@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>REI CHRONO — Prototype 04.3</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#050b16;color:#e9faff;font-family:ui-monospace,monospace;padding:14px}
+#game{max-width:900px;margin:auto;background:#071020;padding:12px;border:1px solid #174b70;border-radius:14px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}
+h1{font-size:clamp(20px,4vw,30px);letter-spacing:.12em;color:#8deaff;margin:0}
+.small{font-size:11px;color:#91b9d1}
+canvas{display:block;width:100%;height:auto;aspect-ratio:16/9;border:1px solid #268cc5;border-radius:8px;image-rendering:pixelated;touch-action:none;background:#07142e}
+button{background:#102c4a;border:1px solid #2788bd;color:#e1faff;border-radius:9px;padding:10px;font-weight:bold;font-family:inherit;cursor:pointer}
+button:disabled{opacity:.35;cursor:not-allowed}
+.topline{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin:9px 0}
+.controls{display:flex;gap:6px;margin-top:8px}
+.controls button{flex:1;min-height:48px;touch-action:none;font-size:15px}
+.panel{background:#0c2038;border:1px solid #2678a6;border-radius:10px;padding:10px;margin-top:10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:8px}
+.weapon-card{text-align:left;min-height:64px}
+.hidden{display:none}
+@media(min-width:700px){body{padding:24px}}
+</style>
+</head>
+<body>
+<main id="game">
+<header>
+ <div><h1>REI CHRONO</h1><div class="small">STAGE 01 : NEON CITY</div></div>
+ <div style="text-align:right"><div id="score">DATA 0 ♥ 5</div><div id="weapon" class="small">ENERGY GUN</div></div>
+</header>
+<canvas id="screen" width="640" height="360" aria-label="REI CHRONO game screen"></canvas>
+<div class="topline">
+ <span id="status" class="small">MISSION START</span>
+ <div style="display:flex;gap:6px"><button id="watch">⌚ NEO WATCH</button><button id="restart">↻ RESTART</button></div>
+</div>
+<div class="controls">
+ <button id="left">◀</button><button id="right">▶</button><button id="jump">JUMP</button><button id="fire">ATTACK</button>
+</div>
+<p class="small" style="text-align:center">PC：A/D または ←/→ 移動　SPACE ジャンプ　J 攻撃　1/2/3 武器変更　E WATCH</p>
+<section id="menu" class="panel hidden">
+ <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="color:#8deaff">NEO WATCH / WEAPON SYSTEM</b><button id="close">CLOSE ✕</button></div>
+ <div id="inventory" class="grid"></div>
+</section>
+<section class="panel">
+ <b style="color:#8deaff;font-size:13px">WEAPON DATA</b>
+ <div class="grid">
+  <div><b>ENERGY GUN</b><div class="small">威力1・高速連射</div></div>
+  <div><b>PLASMA RIFLE</b><div class="small">威力3・低速連射</div></div>
+  <div><b>PLASMA SWORD</b><div class="small">威力3・近距離攻撃</div></div>
+ </div>
+</section>
+<p class="small" style="text-align:center">Prototype 04.3 — 開発用試作版</p>
+</main>
+<script>
+(()=>{
+const $=id=>document.getElementById(id),canvas=$('screen'),ctx=canvas.getContext('2d');
+const W=640,H=360;
+const guns=[
+{id:1,name:'ENERGY GUN',desc:'威力1・高速連射',damage:1,rate:14,speed:8,size:4,color:'#62eaff'},
+{id:2,name:'PLASMA SWORD',desc:'近距離・威力3',damage:3,rate:30,speed:0,size:0,color:'#60dfff'},
+{id:3,name:'PLASMA RIFLE',desc:'威力3・低速連射',damage:3,rate:42,speed:5,size:8,color:'#d38cff'}
+];
+let p,enemies,shots,loot,fx,score,camera,frame,weapon,owned,watchOpen,state,msg,msgTimer,keys={},held={};
+function say(t){msg=t;msgTimer=90;$('status').textContent=t}
+function reset(){
+ p={x:55,y:260,w:19,h:30,vy:0,hp:5,face:1,ground:true,cool:0,slash:0,inv:0};
+ enemies=[{x:250,base:250,hp:4,max:4},{x:420,base:420,hp:6,max:6},{x:720,base:720,hp:4,max:4},{x:940,base:940,hp:9,max:9}].map(e=>({...e,dead:false}));
+ shots=[];loot=[{x:550,type:0},{x:810,type:2},{x:1100,type:3}].map(a=>({...a,got:false}));
+ fx=[];score=0;camera=0;frame=0;weapon=1;owned=[1];watchOpen=false;state='play';say('MISSION START');$('menu').classList.add('hidden');ui()
+}
+function ui(){
+ $('score').textContent='DATA '+score+'  ♥ '+p.hp;
+ $('weapon').textContent=guns[weapon-1].name;
+ $('inventory').innerHTML=guns.map(g=>`<button class="weapon-card" data-w="${g.id}" ${owned.includes(g.id)?'':'disabled'}><b>${g.name}</b><br><small>${owned.includes(g.id)?g.desc:'LOCKED'}</small>${weapon===g.id?' ✓':''}</button>`).join('');
+ $('inventory').querySelectorAll('[data-w]').forEach(b=>b.onclick=()=>equip(+b.dataset.w))
+}
+function equip(n){if(!owned.includes(n))return;weapon=n;ui();say(guns[n-1].name+' EQUIPPED')}
+function toggleWatch(){if(state!=='play')return;watchOpen=!watchOpen;$('menu').classList.toggle('hidden',!watchOpen);if(watchOpen)ui();say(watchOpen?'NEO WATCH : TIME PAUSED':'SYSTEM RESUMED')}
+function jump(){if(!watchOpen&&state==='play'&&p.ground){p.vy=-10;p.ground=false}}
+function kill(e){if(e.dead)return;e.dead=true;score+=10;for(let i=0;i<9;i++)fx.push({x:e.x+10,y:277,vx:(Math.random()-.5)*4,vy:(Math.random()-.5)*4,life:25,color:'#ff5d9b'});say('ENEMY DESTROYED')}
+function damageEnemy(e,d){e.hp-=d;for(let i=0;i<5;i++)fx.push({x:e.x+10,y:277,vx:(Math.random()-.5)*3,vy:(Math.random()-.5)*3,life:14,color:'#eaffff'});if(e.hp<=0)kill(e)}
+function attack(){
+ if(watchOpen||state!=='play'||p.cool>0)return;
+ const g=guns[weapon-1];p.cool=g.rate;
+ if(weapon===2){
+  p.slash=15;
+  enemies.forEach(e=>{if(!e.dead&&Math.abs(e.x-p.x)<62&&Math.sign(e.x-p.x)===p.face)damageEnemy(e,g.damage)});
+  for(let i=0;i<10;i++)fx.push({x:p.x+p.face*25,y:p.y+10,vx:p.face*(1+i*.3),vy:(i-5)*.65,life:16,color:i%2?'#6aeaff':'#eaffff'});
+ }else shots.push({x:p.x+p.face*18,y:p.y+12,vx:p.face*g.speed,damage:g.damage,color:g.color,size:g.size,life:110})
+}
+function bind(id,k){
+ const b=$(id);
+ b.addEventListener('pointerdown',e=>{e.preventDefault();held[k]=true;b.setPointerCapture?.(e.pointerId)});
+ ['pointerup','pointerleave','pointercancel','lostpointercapture'].forEach(ev=>b.addEventListener(ev,()=>held[k]=false))
+}
+bind('left','left');bind('right','right');bind('jump','jump');bind('fire','fire');
+$('watch').onclick=toggleWatch;$('close').onclick=toggleWatch;$('restart').onclick=reset;
+window.addEventListener('keydown',e=>{
+ let k=e.key.toLowerCase();keys[k]=true;
+ if([' ','arrowleft','arrowright'].includes(k))e.preventDefault();
+ if(k==='e'&&!e.repeat)toggleWatch();
+ if(k===' '&&!e.repeat)jump();
+ if(k==='j')attack();
+ if('123'.includes(k)&&k.length===1)equip(+k);
+ if(k==='enter'&&state!=='play')reset()
+});
+window.addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+function update(){
+ if(state!=='play'||watchOpen)return;
+ frame++;
+ let l=keys.a||keys.arrowleft||held.left,r=keys.d||keys.arrowright||held.right;
+ p.vy+=.48;p.x=Math.max(0,Math.min(1200,p.x+(r?2.7:0)-(l?2.7:0)));
+ if(r)p.face=1;if(l)p.face=-1;
+ if((keys[' ']||keys.arrowup||held.jump)&&p.ground)jump();
+ if(keys.j||held.fire)attack();
+ p.y+=p.vy;if(p.y>260){p.y=260;p.vy=0;p.ground=true}
+ if(p.cool>0)p.cool--;if(p.slash>0)p.slash--;if(p.inv>0)p.inv--;
+ enemies.forEach(e=>{
+  if(e.dead)return;e.x=e.base+Math.sin(frame/35+e.base)*55;
+  const overlapX=p.x+16>e.x+2&&p.x+3<e.x+21;
+  const overlapY=p.y+28>273&&p.y+3<290;
+  if(overlapX&&overlapY&&p.inv===0){
+   p.hp--;p.inv=65;say('DAMAGE!');
+   if(p.hp<=0){state='over';say('MISSION FAILED')}
+  }
+ });
+ shots.forEach(s=>{
+  s.x+=s.vx;s.life--;
+  enemies.forEach(e=>{
+   if(!e.dead&&s.x+s.size>e.x+2&&s.x-s.size<e.x+21&&s.y+5>273&&s.y-5<290){
+    damageEnemy(e,s.damage);s.life=0
+   }
+  })
+ });
+ shots=shots.filter(s=>s.life>0);
+ loot.forEach(a=>{
+  if(a.got||Math.abs(p.x-a.x)>23)return;a.got=true;
+  if(a.type===0){score++;say('DATA CHIP +1')}
+  else{let id=a.type===2?2:3;if(!owned.includes(id))owned.push(id);say(guns[id-1].name+' ACQUIRED!');ui()}
+ });
+ fx.forEach(a=>{a.x+=a.vx;a.y+=a.vy;a.life--});fx=fx.filter(a=>a.life>0);
+ camera=Math.max(0,Math.min(560,p.x-180));
+ if(p.x>1160){state='clear';say('STAGE CLEAR!')}
+ if(msgTimer>0)msgTimer--;ui()
+}
+function rect(a,b,w,h,col){ctx.fillStyle=col;ctx.fillRect(Math.round(a),Math.round(b),w,h)}
+function sword(px,py,dir,angle){
+ ctx.save();ctx.translate(px,py);ctx.rotate(angle*dir);
+ rect(-3,-2,13,5,'#26385e');rect(-5,-3,4,7,'#d7f3ff');
+ rect(7,-5,4,11,'#8beaff');rect(8,-3,2,7,'#fff');
+ rect(10,-3,9,6,'#2377c9');rect(17,-4,19,8,'#24a9ff');
+ rect(25,-3,17,6,'#62eaff');rect(39,-2,12,4,'#c9fbff');rect(49,-1,5,2,'#fff');
+ ctx.restore()
+}
+function draw(){
+ ctx.clearRect(0,0,W,H);
+ let g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#07142e');g.addColorStop(1,'#17102d');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+ for(let i=0;i<18;i++){
+  let xx=((i*57-camera*.3)%700+700)%700,h=65+i*37%110;
+  rect(xx,290-h,30,h,i%2?'#102344':'#142c4b');
+  for(let y=300-h;y<280;y+=18)rect(xx+7,y,5,5,'#205879')
+ }
+ rect(0,290,W,70,'#101b2d');rect(0,290,W,3,'#24bde9');
+ ctx.save();ctx.translate(-camera,0);
+ enemies.forEach(e=>{
+  if(e.dead)return;
+  rect(e.x,273,23,17,'#75284f');rect(e.x+5,278,13,4,'#ff557d');rect(e.x+8,268,7,5,'#bd4b79');
+  rect(e.x,262,26,4,'#253b53');rect(e.x,262,26*(e.hp/e.max),4,'#ff557d')
+ });
+ loot.forEach(a=>{if(!a.got){rect(a.x-5,270,10,10,a.type===0?'#4deaff':a.type===2?'#69baff':'#d38cff');rect(a.x-2,266,4,18,'#eaffff')}});
+ shots.forEach(s=>{rect(s.x-s.size,s.y-s.size/2,s.size*2,s.size,s.color);rect(s.x-2,s.y-1,4,2,'white')});
+ fx.forEach(a=>rect(a.x,a.y,4,3,a.color));
+ if(p.inv===0||frame%8<4){
+  rect(p.x+4,p.y,12,10,'#eff8ff');rect(p.x+7,p.y+5,9,2,'#54cfff');
+  rect(p.x+2,p.y+10,16,13,'#1267a1');rect(p.x+4,p.y+23,5,7,'#b9d9ed');rect(p.x+12,p.y+23,5,7,'#b9d9ed');
+  if(weapon===2){
+   sword(p.x+10+p.face*7,p.y+17,p.face,p.slash>0?-.65:Math.sin(frame/8)*.08);
+   if(p.slash>0){
+    ctx.save();ctx.translate(p.x+25*p.face,p.y+10);ctx.scale(p.face,1);
+    ctx.strokeStyle='#62eaff';ctx.lineWidth=7;ctx.shadowColor='#3adfff';ctx.shadowBlur=15;
+    ctx.beginPath();ctx.arc(0,0,39,-1.1,.9);ctx.stroke();ctx.restore()
+   }
+  }else rect(p.x+(p.face===1?15:-3),p.y+12,weapon===3?9:6,weapon===3?7:5,guns[weapon-1].color)
+ }
+ ctx.restore();
+ rect(12,12,125,30,'#091d38');ctx.fillStyle='#c2f7ff';ctx.font='12px monospace';ctx.fillText('HP '+'♥'.repeat(Math.max(0,p.hp)),20,31);
+ if(msgTimer>0){ctx.fillStyle='#c6faff';ctx.font='bold 15px monospace';ctx.textAlign='center';ctx.fillText(msg,320,65);ctx.textAlign='left'}
+ if(watchOpen){rect(0,0,W,H,'rgba(0,8,24,.7)');ctx.fillStyle='#a4f7ff';ctx.textAlign='center';ctx.font='bold 24px monospace';ctx.fillText('NEO WATCH',320,160);ctx.font='14px monospace';ctx.fillText('TIME PAUSED',320,185);ctx.textAlign='left'}
+ if(state==='over'||state==='clear'){
+  rect(0,0,W,H,'rgba(0,5,18,.8)');ctx.fillStyle=state==='clear'?'#75f4ff':'#ff6d91';
+  ctx.textAlign='center';ctx.font='bold 28px monospace';ctx.fillText(state==='clear'?'STAGE CLEAR':'MISSION FAILED',320,165);
+  ctx.font='14px monospace';ctx.fillStyle='white';ctx.fillText('PRESS RESTART OR ENTER',320,195);ctx.textAlign='left'
+ }
+}
+function loop(){update();draw();requestAnimationFrame(loop)}
+reset();loop();
+})();
+</script>
+</body>
+</html>
